@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!--
+    보안: GitHub Pages는 HTTP 응답 헤더를 설정할 수 없으므로 <meta> CSP로 대체합니다.
+    - 스크립트/스타일은 동일 출처 + Google Identity Services(선택 로그인)만 허용
+      (style-src 의 sha256 은 GIS SDK 가 주입하는 인라인 <style> 용. 'unsafe-inline' 보다 엄격.
+       Google 이 해당 스타일을 바꾸면 콘솔의 CSP 오류 메시지에 새 해시가 나오므로 교체하세요)
+    - 네트워크 요청은 Gemini API / GIS로만 허용
+    - 인라인 스크립트·인라인 style 속성 없음 (JS의 element.style 조작은 CSP 영향 없음)
+    ※ frame-ancestors / X-Frame-Options 는 meta로 지정할 수 없습니다.
+  -->
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw='; img-src 'self' data: https://*.googleusercontent.com; connect-src https://generativelanguage.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; base-uri 'none'; form-action 'none'; object-src 'none'"
+  />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+  <title>FLOW BEAT STUDIO — Modular AI Synth & BGM Workstation</title>
+  <meta
+    name="description"
+    content="분위기를 입력하면 Gemini AI가 16스텝 패턴을 작곡하고, 브라우저 Web Audio 신스가 연주하는 BGM 스튜디오. WAV 내보내기 지원."
+  />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0b0e14" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="FLOW BEAT STUDIO — Modular AI Synth & BGM Workstation" />
+  <meta property="og:description" content="Gemini AI 작곡 + Web Audio 신스 · 16스텝 시퀀서 · WAV 내보내기" />
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2338bdf8'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23060911'%3E%E2%97%88%3C/text%3E%3C/svg%3E"
+  />
+
+  <!-- 구형 브라우저 기능 감지 (CSP 호환을 위해 인라인이 아닌 외부 classic 스크립트) -->
+  <script src="./src/compat.js"></script>
+
+  <link rel="stylesheet" href="./assets/css/variables.css" />
+  <link rel="stylesheet" href="./assets/css/layout.css" />
+  <link rel="stylesheet" href="./assets/css/components.css" />
+</head>
+<body>
+  <a class="skip-link" href="#workspace">본문으로 건너뛰기</a>
+
+  <noscript>
+    <p class="compat-warning">이 앱은 JavaScript가 필요합니다. 브라우저에서 JavaScript를 활성화해 주세요.</p>
+  </noscript>
+  <p id="compatWarning" class="compat-warning hidden" role="alert"></p>
+
+  <div class="app-shell">
+    <!-- 상단 헤더 -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">◈</div>
+        <div>
+          <h1 class="brand-title">FLOW BEAT STUDIO</h1>
+          <p class="brand-sub">Modular Web Audio Synth &amp; Google AI Free Tier Composer</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div id="userProfileChip" class="user-chip hidden">
+          <img id="userAvatar" class="user-avatar" alt="프로필" width="24" height="24" referrerpolicy="no-referrer" />
+          <span id="userName" class="user-name"></span>
+        </div>
+
+        <button id="openAuthModalBtn" class="btn btn-outline" type="button" aria-haspopup="dialog" aria-controls="authModal" aria-expanded="false">
+          <span id="aiStatusDot" class="status-dot offline"></span>
+          <span id="aiStatusLabel">로컬 모드 (Google 무료 연동)</span>
+        </button>
+
+        <button id="playToggleBtn" class="btn btn-primary" type="button">
+          ▶ 재생
+        </button>
+      </div>
+    </header>
+
+    <!-- AI 프롬프트 & 프리셋 바 -->
+    <section class="prompt-panel card">
+      <div class="prompt-row">
+        <label class="sr-only" for="moodPromptInput">음악 분위기 또는 장면 설명</label>
+        <input
+          id="moodPromptInput"
+          class="input prompt-input"
+          type="text"
+          maxlength="300"
+          autocomplete="off"
+          placeholder="예: 비 오는 새벽 코딩할 때 집중하기 좋은 따뜻한 재즈 로파이 비트"
+          value="비 오는 새벽 코딩할 때 집중하기 좋은 따뜻한 로파이"
+        />
+        <button id="composeBtn" class="btn btn-accent" type="button">
+          ✨ AI 트랙 생성
+        </button>
+      </div>
+
+      <div class="preset-bar">
+        <span class="preset-label">빠른 프리셋:</span>
+        <div id="presetButtons" class="preset-list"></div>
+      </div>
+
+      <div class="track-meta-bar">
+        <div class="track-info">
+          <span class="badge" id="engineBadge">LOCAL ENGINE</span>
+          <strong id="trackTitleDisplay">Rainy Dawn Code (Lo-Fi)</strong>
+        </div>
+        <div class="export-actions">
+          <button id="copyFlowPromptBtn" class="btn btn-ghost btn-sm" type="button">
+            📋 Flow Music 프롬프트 복사
+          </button>
+          <button id="exportWavBtn" class="btn btn-secondary btn-sm" type="button">
+            💾 8마디 WAV 저장
+          </button>
+          <button id="exportMidiBtn" class="btn btn-secondary btn-sm" type="button">
+            🎹 MIDI 저장
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 메인 워크스페이스: 좌측 신스 파라미터 / 우측 16스텝 시퀀서 -->
+    <main id="workspace" class="workspace-grid" tabindex="-1">
+      <!-- 좌측 신스 & 앰비언스 컨트롤 -->
+      <aside class="controls-panel card">
+        <h2 class="panel-title">신스 &amp; 앰비언스 컨트롤</h2>
+
+        <div class="control-group">
+          <label class="control-label" for="bpmSlider">
+            <span>템포 (BPM)</span>
+            <strong id="bpmValue">82 BPM</strong>
+          </label>
+          <input id="bpmSlider" type="range" min="60" max="145" value="82" />
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="scaleSelect">
+            <span>스케일 / 코드 무드</span>
+          </label>
+          <select id="scaleSelect" class="select"></select>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="waveformSelect">
+            <span>코드 / 리드 파형</span>
+          </label>
+          <select id="waveformSelect" class="select">
+            <option value="triangle">Triangle (따뜻한 EP 질감)</option>
+            <option value="sine">Sine (부드러운 앰비언트)</option>
+            <option value="sawtooth">Sawtooth (레트로 신스웨이브)</option>
+            <option value="square">Square (칩튠 / 펑키 리드)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="cutoffSlider">
+            <span>로우패스 따뜻함 (Cutoff)</span>
+            <strong id="cutoffValue">1800 Hz</strong>
+          </label>
+          <input id="cutoffSlider" type="range" min="350" max="6500" step="50" value="1800" />
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="reverbSlider">
+            <span>리버브 공간감 (Reverb)</span>
+            <strong id="reverbValue">35%</strong>
+          </label>
+          <input id="reverbSlider" type="range" min="0" max="100" value="35" />
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="vinylSlider">
+            <span>바이닐 노이즈 (LP Crackle)</span>
+            <strong id="vinylValue">20%</strong>
+          </label>
+          <input id="vinylSlider" type="range" min="0" max="100" value="20" />
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="rainSlider">
+            <span>빗소리 앰비언스 (Rain)</span>
+            <strong id="rainValue">25%</strong>
+          </label>
+          <input id="rainSlider" type="range" min="0" max="100" value="25" />
+        </div>
+
+        <div class="flow-prompt-box">
+          <div class="flow-prompt-header">Google Flow Music 추천 영문 프롬프트</div>
+          <p id="flowPromptText" class="flow-prompt-text"></p>
+        </div>
+      </aside>
+
+      <!-- 우측 시퀀서 + 믹서 + 비주얼라이저 -->
+      <section class="sequencer-panel card">
+        <div class="sequencer-header">
+          <h2 class="panel-title">16-스텝 패턴 시퀀서 &amp; 5채널 믹서</h2>
+          <div class="sequencer-tools">
+            <button id="clearPatternBtn" class="btn btn-ghost btn-sm" type="button">패턴 초기화</button>
+            <button id="randomizeLeadBtn" class="btn btn-ghost btn-sm" type="button">멜로디 변주</button>
+          </div>
+        </div>
+
+        <div id="stepIndicatorRow" class="step-indicator-row"></div>
+        <div id="sequencerGrid" class="sequencer-grid"></div>
+
+        <div class="piano-roll">
+          <div class="piano-roll-header">
+            <h3 id="pianoRollTitle" class="panel-subtitle">리드 멜로디 에디터 (피아노롤)</h3>
+            <div class="piano-roll-tools">
+              <span id="kbStatus" class="kb-status" role="status" aria-live="polite"></span>
+              <button id="kbModeBtn" class="btn btn-ghost btn-sm" type="button" aria-pressed="false" aria-controls="kbPanel">
+                ⌨ 키보드 모드
+              </button>
+            </div>
+          </div>
+
+          <!-- 키보드 모드: 1옥타브 건반 + 단축키 -->
+          <div id="kbPanel" class="kb-panel hidden" tabindex="-1" aria-label="키보드 입력 모드">
+            <div class="kb-controls">
+              <div class="kb-control-group">
+                <button id="kbOctDown" class="btn btn-secondary btn-sm" type="button">▼ 옥타브 <kbd>Z</kbd></button>
+                <strong id="kbOctLabel" class="kb-value">옥타브 4</strong>
+                <button id="kbOctUp" class="btn btn-secondary btn-sm" type="button">▲ 옥타브 <kbd>X</kbd></button>
+              </div>
+              <div class="kb-control-group">
+                <button id="kbPrevStep" class="btn btn-secondary btn-sm" type="button">◀ 이전 칸 <kbd>←</kbd></button>
+                <strong id="kbStepLabel" class="kb-value">STEP 01 / 16</strong>
+                <button id="kbNextStep" class="btn btn-secondary btn-sm" type="button">다음 칸 <kbd>→</kbd> ▶</button>
+              </div>
+              <label class="kb-check">
+                <input id="kbAutoAdvance" type="checkbox" />
+                입력 후 자동으로 다음 칸
+              </label>
+            </div>
+
+            <div id="kbKeys" class="kb-keys" role="group" aria-label="1옥타브 건반 (단축키 표시)"></div>
+
+            <p class="kb-help">
+              <kbd>A</kbd>–<kbd>K</kbd> 흰 건반 · <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> 검은 건반 ·
+              <kbd>Z</kbd>/<kbd>X</kbd> 또는 <kbd>↓</kbd>/<kbd>↑</kbd> 옥타브 ·
+              <kbd>→</kbd>/<kbd>Space</kbd> 다음 칸 · <kbd>←</kbd> 이전 칸 ·
+              <kbd>Home</kbd>/<kbd>End</kbd> 처음/끝 칸 · <kbd>Backspace</kbd> 지우기 · <kbd>Esc</kbd> 종료
+            </p>
+          </div>
+
+          <div id="pianoRoll" class="piano-roll-grid" role="group" aria-labelledby="pianoRollTitle"></div>
+          <p class="piano-roll-hint">클릭·드래그로 음 입력 / 켜진 칸에서 시작해 드래그하면 삭제 / 방향키 이동 · Enter 입력 · Delete 삭제 · PageUp/Down 옥타브</p>
+        </div>
+
+        <div class="visualizer-wrap">
+          <div class="visualizer-header">
+            <span>실시간 오디오 스펙트럼 (FFT Analyser)</span>
+            <span id="stepCounterLabel">STEP 01 / 16</span>
+          </div>
+          <canvas id="spectrumCanvas" width="800" height="140" role="img" aria-label="실시간 오디오 주파수 스펙트럼 시각화"></canvas>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Google 계정 & 무료 API Key 연동 모달 -->
+  <div id="authModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="authModalTitle">본인 Google 계정 무료 연동 설정</h3>
+        <button id="closeAuthModalBtn" class="btn btn-ghost btn-sm" type="button" aria-label="닫기">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="info-callout">
+          <strong>100% 무료 · 로컬 브라우저 직접 통신:</strong><br />
+          입력한 키는 사용자 브라우저의 <code>localStorage</code>에만 저장되며 외부 서버로 전송되지 않습니다.
+        </div>
+
+        <div class="modal-section">
+          <h4 class="modal-section-title">1. Google AI Studio 무료 API Key (Gemini 작곡 엔진)</h4>
+          <p class="modal-desc">
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>에서 본인 구글 계정으로 무료 API 키를 발급받아 붙여넣으세요. (카드 등록 불필요)
+          </p>
+          <div class="input-row">
+            <input
+              id="geminiApiKeyInput"
+              class="input"
+              type="password"
+              placeholder="AIzaSy..."
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              maxlength="256"
+              aria-label="Gemini API 키"
+            />
+            <select id="geminiModelSelect" class="select model-select" aria-label="Gemini 모델 선택">
+              <option value="gemini-3.8-flash">gemini-3.8-flash (무료 최신)</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (초고속 무료)</option>
+              <option value="gemini-3.6-flash">gemini-3.6-flash (무료 안정)</option>
+            </select>
+          </div>
+          <div class="modal-btn-row">
+            <button id="testSaveApiKeyBtn" class="btn btn-primary" type="button">
+              연동 테스트 및 저장
+            </button>
+            <button id="removeApiKeyBtn" class="btn btn-ghost" type="button">키 삭제</button>
+          </div>
+          <p id="apiTestFeedback" class="feedback-text" role="status" aria-live="polite"></p>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="modal-section">
+          <h4 class="modal-section-title">2. Google 계정 로그인 연동 (GIS OAuth 2.0 · 선택)</h4>
+          <p class="modal-desc">
+            Google Cloud Console에서 발급한 웹 OAuth 2.0 Client ID가 있다면 입력 후 구글 계정으로 직접 로그인할 수 있습니다.
+          </p>
+          <div class="input-row">
+            <input
+              id="googleClientIdInput"
+              class="input"
+              type="text"
+              placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxx.apps.googleusercontent.com"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="256"
+              aria-label="Google OAuth 클라이언트 ID"
+            />
+            <button id="saveClientIdBtn" class="btn btn-secondary" type="button">Client ID 적용</button>
+          </div>
+          <div id="googleSignInContainer" class="google-signin-box"></div>
+          <button id="googleSignOutBtn" class="btn btn-ghost btn-sm hidden" type="button">로그아웃</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
